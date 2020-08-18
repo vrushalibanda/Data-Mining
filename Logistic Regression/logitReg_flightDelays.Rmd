@@ -1,0 +1,135 @@
+
+
+#### Prerequisites
+```{r}
+library(reshape)
+library(ggplot2)
+```
+
+
+#### Input
+```{r}
+delays.df <- read.csv("~/Courses/DataMining_CSEB/DMBA-R-datasets/FlightDelays.csv")
+
+# transform variables and create bins
+delays.df$DAY_WEEK <- factor(delays.df$DAY_WEEK, levels = c(1:7), 
+                             labels = c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
+delays.df$CRS_DEP_TIME <- factor(round(delays.df$CRS_DEP_TIME/100))
+
+# create reference categories
+delays.df$ORIGIN <- relevel(delays.df$ORIGIN, ref = "IAD")
+delays.df$DEST <- relevel(delays.df$DEST, ref = "LGA")
+delays.df$CARRIER <- relevel(delays.df$CARRIER, ref = "US")
+delays.df$DAY_WEEK <- relevel(delays.df$DAY_WEEK, ref = "Wed")
+delays.df$isDelay <- 1 * (delays.df$Flight.Status == "delayed")
+t(t(names(delays.df)))
+```
+
+Partition the data
+```{r}
+selected.var <- c(10, 1, 8, 4, 2, 9, 14)
+train.index <- sample(c(1:dim(delays.df)[1]), dim(delays.df)[1]*0.6)  
+train.df <- delays.df[train.index, selected.var]
+valid.df <- delays.df[-train.index, selected.var]
+```
+
+
+
+#### Average dealys vs. predictors
+```{r}
+barplot(aggregate(delays.df$Flight.Status == "delayed", by = list(delays.df$DAY_WEEK), 
+                  mean, rm.na = T)[,2], xlab = "Day of Week", ylab = "Average Delay", 
+        names.arg = c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))
+# for other predictors, replace aggregating variable by setting argument by =  in 
+# aggregate(). 
+# in function barplot(), set the x-label (argument xlab =) and y-label 
+# (argument names.arg =) 
+# according to the variable of choice:
+table(delays.df$CARRIER)
+barplot(aggregate(delays.df$Flight.Status == "delayed", by = list(delays.df$CARRIER), 
+                  mean, rm.na = T)[,2], xlab = "Carrier", ylab = "Average Delay", 
+        names.arg = c("US", "CO", "DH", "DL", "MQ", "OH", "RU", "UA"))
+```
+PERCENT OF DELAYED FLIGHTS (DARKER = HIGHER %DELAYS) BY DAY OF WEEK,
+ORIGIN, AND CARRIER
+```{r}
+#create matrix for plot
+delays.df$isDelay <- 1 * (delays.df$Flight.Status == "delayed")
+
+agg <- aggregate(delays.df$isDelay, 
+                 by = list(delays.df$DAY_WEEK, delays.df$CARRIER, delays.df$ORIGIN), 
+                 FUN = mean, na.rm = TRUE)
+m <- melt(agg)
+names(m)[1:3] <- c("DAY_WEEK", "CARRIER", "ORIGIN")
+
+# plot with ggplot
+# use facet_grid() with arguments scales = "free" and space = "free" to skip 
+# missing values.
+ggplot(m, aes(y = CARRIER, x = DAY_WEEK, fill = value)) +  geom_tile() + 
+  facet_grid(ORIGIN ~ ., scales = "free", space = "free") + 
+  scale_fill_gradient(low="white", high="black")
+```
+#### Run logistic model, and show coefficients and odds
+```{r}
+lm.fit <- glm(isDelay ~ ., data = train.df, family = "binomial")
+data.frame(summary(lm.fit)$coefficients, odds = exp(coef(lm.fit))) 
+
+round(data.frame(summary(lm.fit)$coefficients, odds = exp(coef(lm.fit))), 5)
+
+```
+The coefficient for Arrival Airport JFK (DESTJFK) is estimated as -0.2
+THE reference group is LGA. It means that 0.81 are the odds of a flight arriving at JFK being delayed relative to a flight to LGA being delayed (= the base-case odds), holding all other variables constant. This means that flights to LGA are more likely to be delayed than
+those to JFK (holding everything else constant). If we consider statistical significance
+of the coefficients, we see that in general, the origin and destination
+airports are not associated with the chance of delays. For carriers, two carriers
+(CO, MQ, MQ being significant and CO - borderline) are significantly different from the base carrier (USAirways), with odds of delay ranging between 2.6 and 4.2 relative to the other airlines. Weather has an enormous coefficient, which is not statistically significant. Flights leaving on Saturday are less likely and on Sunday are more likely to be delayed than on Wednsday (the other days seem statistically similar to the reference group
+Wednesday). Also, odds of delays appear to change over the course of the day,
+with the most noticeable difference from the reference category (6–7 AM) being
+2–5 PM and then again at 7PM.
+
+CONFUSION MATRIX AND LIFT CHART FOR THE FLIGHT DELAY VALIDATION DATA
+USING ALL PREDICTORS
+```{r}
+
+library(gains)
+pred <- predict(lm.fit, valid.df)
+gain <- gains(valid.df$isDelay, pred, groups=100)
+
+plot(c(0,gain$cume.pct.of.total*sum(valid.df$isDelay))~
+       c(0,gain$cume.obs), 
+     xlab="# cases", ylab="Cumulative", main="", type="l")
+lines(c(0,sum(valid.df$isDelay))~c(0, dim(valid.df)[1]), lty=2)
+
+confusionMatrix(as.factor(ifelse(pred > 0.5, 1, 0)), as.factor(valid.df$isDelay))
+```
+### Reduce the number of predictors
+```{r}
+delays.df$Weekend <- delays.df$DAY_WEEK %in% c("Sun", "Sat")
+delays.df$CARRIER_CO_MQ_DH_RU <- delays.df$CARRIER %in% c("CO", "MQ", "DH", "RU")
+delays.df$MORNING <- delays.df$CRS_DEP_TIME %in% c(6, 7, 8, 9)
+delays.df$NOON <- delays.df$CRS_DEP_TIME %in% c(10, 11, 12, 13)
+delays.df$AFTER2P <- delays.df$CRS_DEP_TIME %in% c(14, 15, 16, 17, 18)
+delays.df$EVENING <- delays.df$CRS_DEP_TIME %in% c(19, 20)
+```
+
+Partition the data
+```{r}
+set.seed(2005)  # Set the seed for the random number generator for reproducing the 
+# partition.
+train.index <- sample(c(1:dim(delays.df)[1]), dim(delays.df)[1]*0.6)  
+valid.index <- setdiff(c(1:dim(delays.df)[1]), train.index)  
+train.df <- delays.df[train.index, ]
+valid.df <- delays.df[valid.index, ]
+```
+
+#### Run regression and evaluate
+```{r}
+lm.fit <- glm(isDelay ~ Weekend + Weather + CARRIER_CO_MQ_DH_RU + MORNING  +  NOON + 
+                AFTER2P + EVENING, data = train.df, family = "binomial")
+summary(lm.fit)
+
+# evaluate
+pred <- predict(lm.fit, valid.df)
+confusionMatrix(as.factor(ifelse(pred > 0.5, 1, 0)), as.factor(valid.df$isDelay))
+```
+**Conclusion** 

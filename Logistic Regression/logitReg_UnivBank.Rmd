@@ -1,0 +1,56 @@
+
+#### Input
+```{r}
+
+bank.df<-read.csv("C:/Users/rajja/Downloads/BAN620_R-datasets/DMBA-R-datasets/UniversalBank.csv")
+bank.df <- bank.df[ , -c(1, 5)]  # Drop ID and zip code columns.
+# treat Education as categorical (R will create dummy variables)
+bank.df$Education <- factor(bank.df$Education, levels = c(1, 2, 3), 
+                            labels = c("Undergrad", "Graduate", "Advanced/Professional"))
+```
+
+Partition the data
+```{r}
+set.seed(2005)
+train.index <- sample(c(1:dim(bank.df)[1]), dim(bank.df)[1]*0.6)  
+train.df <- bank.df[train.index, ]
+valid.df <- bank.df[-train.index, ]
+```
+
+#### Logistic Regression
+```{r}
+logit.reg <- glm(Personal.Loan ~ ., data = train.df, family = "binomial") 
+options(scipen=999)
+summary(logit.reg)
+```
+Compute predicted probabilities.
+```{r}
+ 
+logit.reg.pred <- predict(logit.reg, valid.df[, -8], type = "response") #dependent variable personal loan is -8
+
+# first 5 actual and predicted records
+data.frame(actual = valid.df$Personal.Loan[1:5], predicted = logit.reg.pred[1:5])
+```
+
+LIFT CHART AND DECILE-WISE LIFT CHART FOR THE VALIDATION DATA FOR
+UNIVERSAL BANK LOAN OFFER
+```{r}
+library(gains)
+gain <- gains(valid.df$Personal.Loan, logit.reg.pred, groups=10)
+
+# plot lift chart
+plot(c(0,gain$cume.pct.of.total*sum(valid.df$Personal.Loan))~c(0,gain$cume.obs), 
+     xlab="# cases", ylab="Cumulative", main="", type="l")
+lines(c(0,sum(valid.df$Personal.Loan))~c(0, dim(valid.df)[1]), lty=2)
+
+# compute deciles and plot decile-wise chart
+heights <- gain$mean.resp/mean(valid.df$Personal.Loan)
+midpoints <- barplot(heights, names.arg = gain$depth, ylim = c(0,9), 
+                     xlab = "Percentile", ylab = "Mean Response", main = "Decile-wise lift chart")
+
+# add labels to columns
+text(midpoints, heights+0.5, labels=round(heights, 1), cex = 0.8)
+```
+The “lift” over the base curve indicates for a given number of cases (read on
+the x-axis), the additional responders that you can identify by using the model.
+Decile-wise lift chart: Taking the 10% of the records that are ranked by the model as “most probable 1’s” yields 7.9 times as many 1’s as would simply selecting 10% of the records at random.
