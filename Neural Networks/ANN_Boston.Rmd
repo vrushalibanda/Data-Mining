@@ -1,0 +1,190 @@
+
+```{r}
+install.packages("corrplot")
+install.packages("NeuralNetTools")
+library(MASS)
+library(neuralnet)
+library(GGally)
+library(corrplot)
+library(boot)                 ### for n-fold cross-validation of linear regression
+library(NeuralNetTools)       ### for evaluating variable importance using garson function
+```
+
+
+We are going to use the *Boston dataset* in the MASS package.
+The Boston dataset is a collection of data about housing values in the suburbs of Boston. Our goal is to predict the median value of owner-occupied homes (medv) using all the other continuous variables available.
+
+### Data
+```{r}
+data <- Boston
+dim(data)
+apply(data,2,function(x) sum(is.na(x)))
+```
+No missing data. Otherwise:  %>% na.omit()
+
+#### Partition data and do linear regression
+```{r}
+set.seed(1992)
+index <- sample(1:nrow(data),round(0.75*nrow(data)))
+train <- data[index,]
+test <- data[-index,]
+lm.fit <- glm(medv~., data=train)
+summary(lm.fit)
+pr.lm <- predict(lm.fit,test)
+MSE.lm <- sum((pr.lm - test$medv)^2)/nrow(test)
+```
+Since we are dealing with a regression problem, we are going to use the mean squared error (MSE) as a measure of how much our predictions are far away from the real data.
+
+#### Explore the dataset
+```{r}
+corrplot(cor(data))
+
+```
+
+
+
+#### Preparing to fit a neural network model: scaling and splitting
+Data preprocessing: depending on your dataset, avoiding normalization may lead to useless results or to a very difficult training process (most of the times the algorithm will not converge before the number of maximum iterations allowed).
+We will do the min-max method and scale the data in the interval [0,1]. Usually scaling in the intervals [0,1] or [-1,1] tends to give better results.We scale and split the data before moving on:
+```{r}
+maxs <- apply(data, 2, max) 
+mins <- apply(data, 2, min)
+
+scaled <- as.data.frame(scale(data, center = mins, scale = maxs - mins))
+
+train_ <- scaled[index,]  #Index is the same variable as in linear regression
+test_ <- scaled[-index,]
+```
+**Note** that scale returns a matrix that needs to be coerced into a data.frame.
+
+#### Fitting a network
+2 hidden layers with the following configuration 13:5:3:1. 
+```{r}
+set.seed(1993)
+nn <- neuralnet(medv ~ ., data = train_, hidden = c(5,3),linear.output=T)
+str(nn)
+```
+
+
+#### PLotting the network
+```{r}
+plot(nn)
+head(nn$result.matrix,10)
+#nn$net.result[[1]]
+```
+#### 1 hidden layer
+```{r}
+set.seed(1993)
+nn1 <- neuralnet(medv ~ ., data = train_, hidden = 14,linear.output=T)
+plot(nn1)
+head(nn1$result.matrix,10)
+```
+
+
+#### Making predictions
+Now we can try to predict the values for the test set and calculate the MSE. **The net will output a normalized prediction, so we need to scale it back in order to make a meaningful comparison (or just a simple prediction).**
+```{r}
+pr.nn <- compute(nn1,test_[,1:13])
+
+pr.nn_ <- pr.nn$net.result*(max(data$medv)-min(data$medv))+min(data$medv)
+test.r <- (test_$medv)*(max(data$medv)-min(data$medv))+min(data$medv)
+
+MSE.nn <- sum((test.r - pr.nn_)^2)/nrow(test_)
+```
+
+**Compare** linear regression and ANN MSE
+```{r}
+
+print(paste(MSE.lm,MSE.nn))
+```
+**Prelim conclusion:** Net appears to perform better than the linear model.
+
+#### Visualize the results of linear and net fit
+```{r}
+par(mfrow=c(1,2))
+
+plot(test$medv,pr.nn_,col='red',main='Real vs predicted NN',pch=18,cex=0.7)
+abline(0,1,lwd=2)
+legend('bottomright',legend='NN',pch=18,col='red', bty='n')
+
+plot(test$medv,pr.lm,col='blue',main='Real vs predicted lm',pch=18, cex=0.7)
+abline(0,1,lwd=2)
+legend('bottomright',legend='LM',pch=18,col='blue', bty='n', cex=.95)
+```
+**Prelim conclusion:**The predictions made by the neural network are (in general) follow the line closer than those made by the linear model.
+
+A better comparison:
+```{r}
+plot(test$medv,pr.nn_,col='red',main='Real vs predicted NN',pch=18,cex=0.7)
+points(test$medv,pr.lm,col='blue',pch=18,cex=0.7)
+abline(0,1,lwd=2)
+legend('bottomright',legend=c('NN','LM'),pch=18,col=c('red','blue'))
+```
+
+#### Cross-validation
+We are going to implement a fast cross validation using a for loop for the neural network and the cv.glm() function in the boot package for the linear model.
+**10-fold cross-validated MSE for the linear model:**
+```{r}
+set.seed(200)
+lm.fit <- glm(medv~.,data=data)
+cv.glm(data,lm.fit,K=10)$delta[1]
+```
+
+**Cross-validation for ANN**
+splitting the data 90% train set and 10% test set in a random way for 10 times:
+```{r}
+set.seed(1991)
+cv.error <- NULL
+k <- 10
+
+library(plyr) 
+pbar <- create_progress_bar('text')
+pbar$init(k)
+
+for(i in 1:k){
+    index <- sample(1:nrow(data),round(0.9*nrow(data)))
+    train.cv <- scaled[index,]
+    test.cv <- scaled[-index,]
+    
+    nn <- neuralnet(medv ~.,data=train.cv,hidden=14,linear.output=T)
+    
+    pr.nn <- compute(nn,test.cv[,1:13])
+    pr.nn <- pr.nn$net.result*(max(data$medv)-min(data$medv))+min(data$medv)
+    
+    test.cv.r <- (test.cv$medv)*(max(data$medv)-min(data$medv))+min(data$medv)
+    
+    cv.error[i] <- sum((test.cv.r - pr.nn)^2)/nrow(test.cv)
+    
+    pbar$step()
+}
+```
+#### Calculate the average MSE and plot the results as a boxplot
+```{r}
+mean(cv.error)
+cv.error
+boxplot(cv.error,xlab='MSE CV',col='cyan',
+        border='blue',names='CV error (MSE)',
+        main='CV error (MSE) for NN',horizontal=TRUE)
+```
+**Conclusion**: although the mean ANN MSE (15.4) is less than the mean of cv linear MSE (23.2). Although ANN MSE has one outlier, the linear MSE is outside of the ANN maximum.
+However, these results may depend on the splitting of the data or the random initialization of the weights in the net. By running the simulation different times with different seeds we can get a more precise point estimate for the average MSE.
+
+#### Contribution of individual features
+```{r}
+par(mfrow=c(2,2))
+gwplot(nn1, selected.covariate = "crim", min=-2.5, max=5)
+gwplot(nn1, selected.covariate = "chas", min=-2.5, max=5)
+gwplot(nn1, selected.covariate = "rm", min=-2.5, max=5)
+gwplot(nn1, selected.covariate = "rad", min=-2.5, max=5)
+```
+
+Evaluating importance using garson function from NeuralNetTools package
+```{r}
+garson(nn1)
+```
+
+And using lekrpofile (from NeuralNetTools)
+```{r}
+lekprofile(nn1, group_vals = 0.9)
+```
+

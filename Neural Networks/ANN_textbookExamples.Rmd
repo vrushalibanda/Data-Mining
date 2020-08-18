@@ -1,0 +1,85 @@
+
+#### Toy examples
+```{r}
+library(neuralnet)
+
+
+df<-read.csv("C:/Users/rajja/Downloads/TinyData.csv")
+head(df)
+
+df$Like <- df$Acceptance=="like"
+df$Dislike <- df$Acceptance=="dislike"
+head(df)
+set.seed(1)
+nn <- neuralnet(Like + Dislike ~ Salt + Fat, data = df, linear.output = F, hidden = 3)
+
+# display weights
+nn$weights
+
+# display predictions
+prediction(nn)
+
+# plot network
+plot(nn, rep="best")
+```
+
+#### Prediction
+```{r}
+library(caret)
+predict <- compute(nn, data.frame(df$Salt, df$Fat))
+predicted.class=apply(predict$net.result,1,which.max)-1
+confusionMatrix(as.factor(ifelse(predicted.class=="1", "dislike", "like")), as.factor(df$Acceptance))
+```
+#### Classifying accident severity
+```{r}
+#accidents.df <- read.csv("~/Courses/DataMining_CSEB/DMBA-R-datasets/accidentsnn.csv")
+accidents.df <-read.csv("C:/Users/rajja/Downloads/accidentsnn.csv")
+# selected variables
+summary(accidents.df)
+vars <- c("ALCHL_I", "PROFIL_I_R", "VEH_INVL")
+```
+
+Parition the data
+```{r}
+
+set.seed(12312)
+training=sample(row.names(accidents.df), dim(accidents.df)[1]*0.6)
+validation=setdiff(row.names(accidents.df), training)
+```
+
+Create dummy variables because of multiple classes
+```{r}
+
+library(nnet)
+trainData <- cbind(accidents.df[training,c(vars)], 
+                   class.ind(accidents.df[training,]$SUR_COND),
+                   class.ind(accidents.df[training,]$MAX_SEV_IR))
+names(trainData) <- c(vars, 
+                   paste("SUR_COND_", c(1, 2, 3, 4, 9), sep=""), paste("MAX_SEV_IR_", c(0, 1, 2), sep=""))
+
+validData <- cbind(accidents.df[validation,c(vars)], 
+                   class.ind(accidents.df[validation,]$SUR_COND),
+                   class.ind(accidents.df[validation,]$MAX_SEV_IR))
+names(validData) <- c(vars, 
+                   paste("SUR_COND_", c(1, 2, 3, 4, 9), sep=""), paste("MAX_SEV_IR_", c(0, 1, 2), sep=""))
+
+```
+
+#### Fit ANN
+```{r}
+nn <- neuralnet(MAX_SEV_IR_0 + MAX_SEV_IR_1 + MAX_SEV_IR_2 ~ 
+                  ALCHL_I + PROFIL_I_R + VEH_INVL + SUR_COND_1 + SUR_COND_2 
+                + SUR_COND_3 + SUR_COND_4, data = trainData, hidden = 2)
+```
+
+Evaluate
+```{r}
+training.prediction <- compute(nn, trainData[,-c(8:11)])
+training.class <- apply(training.prediction$net.result,1,which.max)-1
+confusionMatrix(as.factor(training.class), as.factor(accidents.df[training,]$MAX_SEV_IR))
+
+validation.prediction <- compute(nn, validData[,-c(8:11)])
+validation.class <-apply(validation.prediction$net.result,1,which.max)-1
+confusionMatrix(as.factor(validation.class), as.factor(accidents.df[validation,]$MAX_SEV_IR))
+```
+

@@ -1,0 +1,146 @@
+
+
+Prereqs
+```{r}
+#install.packages(c("keras", "tfruns", "tfestimators"))
+library(dslabs)
+library(keras) 
+library(tfestimators)
+library(tfruns)
+library(dplyr)
+#tensorflow::install_tensorflow()
+```
+We’ll use the MNIST data to illustrate various DNN concepts. With DNNs, it is important to note a few items:
+Feedforward DNNs require all feature inputs to be numeric. Consequently, if your data contains categorical features they will need to be numerically encoded (e.g., one-hot encoded, integer label encoded, etc.).
+Due to the data transformation process that DNNs perform, they are highly sensitive to the individual scale of the feature values. Consequently, we should standardize our features first. Although the MNIST features are measured on the same scale (0–255), they are not standardized (i.e., have mean zero and unit variance); the code chunk below standardizes the MNIST data to resolve this.35
+Since we are working with a multinomial response (0–9), keras requires our response to be a one-hot encoded matrix, which can be accomplished with the keras function to_categorical().
+```{r}
+# Import MNIST training data
+mnist <- dslabs::read_mnist()
+str(mnist)
+mnist_x <- mnist$train$images
+mnist_y <- mnist$train$labels
+
+
+i <- 5
+image(1:28, 1:28, matrix(mnist$test$images[i,], nrow=28)[ , 28:1], 
+    col = gray(seq(0, 1, 0.05)), xlab = "", ylab="")
+## the labels for this image is: 
+mnist$test$labels[i]
+
+# Rename columns and standardize feature values
+colnames(mnist_x) <- paste0("V", 1:ncol(mnist_x))
+mnist_x <- mnist_x / 255
+
+# One-hot encode response
+mnist_y <- to_categorical(mnist_y, 10)
+dim(mnist_y)
+```
+### Output layers
+The keras package allows us to develop our network with a layering approach. First, we initiate our sequential feedforward DNN architecture with keras_model_sequential() and then add some dense layers. This example creates two hidden layers, the first with 128 nodes and the second with 64, followed by an output layer with 10 nodes. One thing to point out is that the first layer needs the input_shape argument to equal the number of features in your data; however, the successive layers are able to dynamically interpret the number of expected inputs based on the previous layer.
+```{r}
+model <- keras_model_sequential() %>%
+  layer_dense(units = 128, input_shape = ncol(mnist_x)) %>%
+  layer_dense(units = 64) %>%
+  layer_dense(units = 10)
+```
+### Activation
+Each node is connected to all the nodes in the previous layer. Each connection gets a weight and then that node adds all the incoming inputs multiplied by its corresponding connection weight plus an extra bias parameter (w0). The summed total of these inputs become an input to an activation function. The activation function is simply a mathematical function that determines whether or not there is enough informative input at a node to fire a signal to the next layer. There are multiple activation functions to choose from but the most common ones include: linear (identity), rectified linear unit, sigmoid and softmax (see slides).
+```{r}
+model <- keras_model_sequential() %>%
+  layer_dense(units = 128, activation = "relu", input_shape = ncol(mnist_x)) %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 10, activation = "softmax")
+```
+
+### Backpropagation
+On the first run (or forward pass), the DNN will select a batch of observations, randomly assign weights across all the node connections, and predict the output. The engine of neural networks is how it assesses its own accuracy and automatically adjusts the weights across all the node connections to improve that accuracy. This process is called backpropagation. To perform backpropagation we need two things:
+1-An objective function;
+2-An optimizer.
+First, you need to establish an objective (loss) function to measure performance. For regression problems this might be mean squared error (MSE) and for classification problems it is commonly binary and multi-categorical cross entropy.
+To incorporate the backpropagation piece of our DNN we include compile() in our code sequence. In addition to the optimizer and loss function arguments, we can also identify one or more metrics in addition to our loss function to track and report.
+```{r}
+model <- keras_model_sequential() %>%
+  
+  # Network architecture
+  layer_dense(units = 128, activation = "relu", input_shape = ncol(mnist_x)) %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dense(units = 10, activation = "softmax") %>%
+  
+  # Backpropagation
+  compile(
+    loss = 'categorical_crossentropy',
+    optimizer = optimizer_rmsprop(),
+    metrics = c('accuracy')
+  )
+```
+
+### Model training
+We’ve created a base model, now we just need to train it with some data. To do so we feed our model into a fit() function along with our training data. We also provide a few other arguments that are worth mentioning:
+**batch_size:** As we mentioned in the last section, the DNN will take a batch of data to run through the mini-batch SGD process. Batch sizes can be between one and several hundred. Small values will be more computationally burdensome while large values provide less feedback signal. Values are typically provided as a power of two that fit nicely into the memory requirements of the GPU or CPU hardware like 32, 64, 128, 256, and so on.
+**epochs:** An epoch describes the number of times the algorithm sees the entire data set. So, each time the algorithm has seen all samples in the data set, an epoch has completed. In our training set, we have 60,000 observations so running batches of 128 will require 469 passes for one epoch. The more complex the features and relationships in your data, the more epochs you’ll require for your model to learn, adjust the weights, and minimize the loss function.
+**validation_split:** The model will hold out XX% of the data so that we can compute a more accurate estimate of an out-of-sample error rate.
+verbose: We set this to FALSE for brevity; however, when TRUE you will see a live update of the loss function in your RStudio IDE.
+Plotting the output shows how our loss function (and specified metrics) improve for each epoch. We see that our model’s performance is optimized at 5–10 epochs and then proceeds to overfit, which results in a flatlined accuracy rate.
+```{r}
+# Train the model
+fit1 <- model %>%
+  fit(
+    x = mnist_x,
+    y = mnist_y,
+    epochs = 25,
+    batch_size = 128,
+    validation_split = 0.2,
+    verbose = FALSE
+  )
+
+# Display output
+fit1
+
+plot(fit1)
+```
+### Model tuning
+There are many ways to tune a DNN. Typically, the tuning process follows these general steps; however, there is often a lot of iteration among these:
+
+1.Adjust model capacity (layers & nodes);
+2.Add batch normalization;
+3.Add regularization;
+4.Adjust learning rate.
+```{r}
+model_w_adj_lrn <- keras_model_sequential() %>%
+  layer_dense(units = 256, activation = "relu", input_shape = ncol(mnist_x)) %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.4) %>%
+  layer_dense(units = 128, activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 10, activation = "softmax") %>%
+  compile(
+    loss = 'categorical_crossentropy',
+    optimizer = optimizer_adam(),
+    metrics = c('accuracy')
+  ) %>%
+  fit(
+    x = mnist_x,
+    y = mnist_y,
+    epochs = 35,
+    batch_size = 128,
+    validation_split = 0.2,
+    callbacks = list(
+      callback_early_stopping(patience = 5),
+      callback_reduce_lr_on_plateau(factor = 0.05)
+      ),
+    verbose = FALSE
+  )
+
+model_w_adj_lrn
+```
+
+And print
+```{r}
+plot(model_w_adj_lrn)
+```
+

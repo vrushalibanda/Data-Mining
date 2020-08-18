@@ -1,0 +1,140 @@
+
+#### Error function
+```{r}
+#err = 1/2*(t - w*x)^2
+# t is a target
+# w is a weight
+# x is a value of predictor variable; y=w*x, where y is the predicted output
+
+
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+ 
+t <- 1.53
+x <- 2 
+ws <- seq(0,1.6,len = 100) # create some values
+
+err <- function(w){
+  1/2*(t - w*x)^2
+}
+#length(w)
+
+
+#err <-  expression(1/2*(t - w*x)^2)
+f <- expression(1/2*(t - w*x)^2)
+D(f,'w')
+
+create_plot <- function(title) {
+  plot(
+    ylim = c(0,1),
+    x = ws,
+    y = err(ws), 
+    type = "l", 
+    ylab = expression(1/2*(t - w*x)^2),
+    xlab = "w",
+    main = title
+    )
+}
+# J(cost)
+cost <- function(w){
+ -(1/2 * (2 * (x * (t - w * x))))
+}
+t
+x
+```
+
+Implementation of gradient descent
+```{r}
+grad <- function(w = 0.1, alpha = 0.6, j = 1000) {
+  
+  wtrace <- w
+  ftrace <- err(w)
+  
+  for (i in 1:j) {
+    
+    w <- w - alpha * cost(w)
+    
+    wtrace <- c(wtrace,w)
+    ftrace <- c(ftrace,err(w))
+    
+    }
+  
+  data.frame(
+    "w" = wtrace,
+    "f_w" = ftrace
+    )
+}
+
+```
+
+Plot the gradients
+```{r}
+create_plot(expression(Low~alpha))
+ 
+with(
+  alpha_too_low <- grad(
+    w = 0.1, # initialisation of w
+    alpha = 0.1, # learning rate
+    j = 100 # iterations
+    ),
+  points(
+    w, 
+    f_w, 
+    type = "b", 
+    col = "green"
+    )
+  )
+```
+At different alpha
+```{r}
+create_plot(expression(alpha~just~right))
+ 
+with(
+  alpha_just_right <- grad(
+    w = 0.1, # initialisation of w
+    alpha = 0.3, # learning rate
+    j = 100 # iterations
+    ),
+  points(
+    w, 
+    f_w, 
+    type = "b", 
+    col = "blue"
+    )
+  )
+```
+
+High alpha
+```{r}
+create_plot(expression(High~alpha))
+ 
+with(
+  alpha_too_high <- grad(
+    w = 0.1, # initialisation of w
+    alpha = 0.49, # learning rate
+    j = 100 # iterations
+    ),
+  points(
+    w, 
+    f_w, 
+    type = "b", 
+    col = "red"
+    )
+  )
+```
+
+#
+```{r}
+par(mfrow=c(1,3))
+ 
+plot(alpha_too_low$w, type = "l",col = "green")
+abline(v = (round(alpha_too_low$w,4) != 0.765) %>% which %>% length)
+ 
+plot(alpha_just_right$w, type = "l",col = "blue")
+abline(v = (round(alpha_just_right$w,4) != 0.765) %>% which %>% length)
+ 
+plot(alpha_too_high$w, type = "l", col = "red")
+abline(v = (round(alpha_too_high$w,4) != 0.765) %>% which %>% length)
+```
+
