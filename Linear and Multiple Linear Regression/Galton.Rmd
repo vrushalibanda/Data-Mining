@@ -1,0 +1,139 @@
+
+
+### Is height hereditary
+We have access to Galton’s family height data through the HistData package. This data contains heights on several dozen families: mothers, fathers, daughters and sons. To imitate Galton’s analysis, we will create a dataset with the heights of fathers and a randomly selected son of each family:
+```{r}
+library(tidyverse)
+install.packages("HistData")
+library(HistData)
+data("GaltonFamilies")
+
+set.seed(1981)
+galton_heights <- GaltonFamilies %>%
+  filter(gender == "male") %>%
+  group_by(family) %>%
+  sample_n(1) %>%
+  ungroup() %>%
+  select(father, childHeight) %>%
+  rename(son = childHeight)
+```
+
+Suppose we were asked to summarize the father and son data. Since both distributions are well approximated by the normal distribution, we could use the two averages and two standard deviations as summaries:
+```{r}
+galton_heights %>% 
+  summarize(mean(father), sd(father), mean(son), sd(son))
+```
+However, this summary fails to describe an important characteristic of the data: the trend that the taller the father, the taller the son.
+```{r}
+galton_heights %>% ggplot(aes(father, son)) + 
+  geom_point(alpha = 0.5)
+```
+
+### Correlation coefficient
+```{r}
+galton_heights %>% summarize(r = cor(father, son)) %>% pull(r)
+```
+## Sample correlation is a random variable
+For example, in many cases, we do not observe data for the entire population of interest but rather for a random sample. As with the average and standard deviation, the sample correlation is the most commonly used estimate of the population correlation. This implies that the correlation we compute and use as a summary is a random variable.
+```{r}
+R <- sample_n(galton_heights, 25, replace = TRUE) %>% 
+  summarize(r = cor(father, son))
+R
+```
+R is a random variable. We can run a Monte Carlo simulation to see its distribution:
+```{r}
+B <- 1000
+N <- 25
+R <- replicate(B, {
+  sample_n(galton_heights, N, replace = TRUE) %>% 
+    summarize(r=cor(father, son)) %>% 
+    pull(r)
+})
+
+qplot(R, geom = "histogram", binwidth = 0.05, color = I("black"))
+```
+
+```{r}
+mean(R)
+sd(R)
+```
+
+However, N=25 does not seem to be large enough to make the approximation a good one:
+```{r}
+data.frame(R) %>% 
+  ggplot(aes(sample=R)) + 
+  stat_qq() + 
+  geom_abline(intercept = mean(R), slope = sqrt((1-mean(R)^2)/(N-2)))
+```
+
+
+If N is increased, the distribution is going to converge to normal
+
+## Adding regression lines to plots
+```{r}
+mu_x <- mean(galton_heights$father)
+mu_y <- mean(galton_heights$son)
+s_x <- sd(galton_heights$father)
+s_y <- sd(galton_heights$son)
+r <- cor(galton_heights$father, galton_heights$son)
+
+m <-  r * s_y / s_x
+b <- mu_y - m*mu_x
+
+galton_heights %>% 
+  ggplot(aes(father, son)) + 
+  geom_point(alpha = 0.5) +
+  geom_abline(intercept = b, slope = m )
+```
+The regression formula implies that if we first standardize the variables, that is subtract the average and divide by the standard deviation, then the regression line has intercept 0 and slope equal to the correlation rho. 
+Here is the same plot, but using standard units:
+```{r}
+galton_heights %>% 
+  ggplot(aes(scale(father), scale(son))) + 
+  geom_point(alpha = 0.5) +
+  geom_abline(intercept = 0, slope = r) 
+```
+## Regression improves precision
+Two ways to predict sons' height:
+1-Round father’s heights to closest inch, stratify, and then take the average.
+2-Compute the regression line and use it to predict.
+We use a Monte Carlo simulation sampling  
+N=50 families:
+```{r}
+B <- 1000
+N <- 50
+
+set.seed(1983)
+conditional_avg <- replicate(B, {
+  dat <- sample_n(galton_heights, N)
+  dat %>% filter(round(father) == 72) %>% 
+    summarize(avg = mean(son)) %>% 
+    pull(avg)
+  })
+
+regression_prediction <- replicate(B, {
+  dat <- sample_n(galton_heights, N)
+  mu_x <- mean(dat$father)
+  mu_y <- mean(dat$son)
+  s_x <- sd(dat$father)
+  s_y <- sd(dat$son)
+  r <- cor(dat$father, dat$son)
+  
+  mu_y + r*(72 - mu_x)/s_x*s_y
+})
+```
+
+Although the expected value of these two random variables is about the same:
+```{r}
+mean(conditional_avg, na.rm = TRUE)
+
+mean(regression_prediction)
+```
+
+The standard error for the regression prediction is substantially smaller:
+```{r}
+sd(conditional_avg, na.rm = TRUE)
+sd(regression_prediction)
+```
+
+The regression line is therefore much more stable than the conditional mean. There is an intuitive reason for this. The conditional average is computed on a relatively small subset: the fathers that are about 72 inches tall. In fact, in some of the permutations we have no data, which is why we use na.rm=TRUE. The regression always uses all the data.

@@ -1,0 +1,115 @@
+
+### Input data, choose predictors
+```{r}
+car.df <- read.csv("~/Courses/DataMining_CSEB/DMBA-R-datasets/ToyotaCorolla.csv")
+# use first 1000 rows of data
+car.df <- car.df[1:1000, ]
+View(car.df)
+t(t(names(car.df)))
+# select variables for regression
+selected.var <- c(3, 4, 7, 8, 9, 10, 12, 13, 14, 17, 18)
+```
+### Partition the data
+```{r}
+set.seed(1)  # set seed for reproducing the partition
+train.index <- sample(c(1:1000), 600)
+head(train.index)
+train.df <- car.df[train.index, selected.var]
+valid.df <- car.df[-train.index, selected.var]
+head(valid.df)
+head(train.df)
+```
+### Run model
+```{r}
+
+# use lm() to run a linear regression of Price on all 11 predictors in the
+# training set. 
+# use . after ~ to include all the remaining columns in train.df as predictors.
+car.lm <- lm(Price ~ ., data = train.df)
+options(scipen = 999)
+summary(car.lm)
+```
+### Make predictions on a hold-out set
+```{r}
+library(forecast)
+# use predict() to make predictions on a new set. 
+car.lm.pred <- predict(car.lm, valid.df)
+options(scipen=999, digits = 0)
+some.residuals <- valid.df$Price[1:20] - car.lm.pred[1:20]
+data.frame("Predicted" = car.lm.pred[1:20], "Actual" = valid.df$Price[1:20],
+           "Residual" = some.residuals)
+
+options(scipen=999, digits = 3)
+# use accuracy() to compute common accuracy measures.
+accuracy(car.lm.pred, valid.df$Price)
+```
+###Histogram of residuals
+```{r}
+library(forecast)
+car.lm.pred <- predict(car.lm, valid.df)
+all.residuals <- valid.df$Price - car.lm.pred
+length(all.residuals[which(all.residuals > -2000 & all.residuals < 2000)])/400
+hist(all.residuals, breaks = 25, xlab = "Residuals", main = "")
+```
+### Run  an exhaustive search for the best model
+```{r}
+# use regsubsets() in package leaps to run an exhaustive search. 
+# unlike with lm, categorical predictors must be turned into dummies manually.
+
+# create dummies for fuel type
+train.df <- car.df[train.index, selected.var]
+valid.df <- car.df[-train.index, selected.var]
+train.index <- sample(c(1:1000), 600)  
+train.df <- car.df[train.index, selected.var]
+dim(train.df)
+Fuel_Type1 <- as.data.frame(model.matrix(~ 0 + Fuel_Type, data=train.df))
+# replace Fuel_Type column with 2 dummies
+train.df <- cbind(train.df[,-4], Fuel_Type1[,])
+head(train.df)
+
+Fuel_Type2 <- as.data.frame(model.matrix(~ 0 + Fuel_Type, data=valid.df))
+# replace Fuel_Type column with 2 dummies
+valid.df <- cbind(valid.df[,-4], Fuel_Type2[,])
+head(valid.df)
+dim(valid.df)
+
+#install.packages("leaps")
+library(leaps)
+search <- regsubsets(Price ~ ., data = train.df, nbest = 1, nvmax = dim(train.df)[2],
+                     method = "exhaustive")
+sum <- summary(search)
+
+# show models
+sum$which
+
+# show metrics
+sum$rsq
+sum$adjr2
+sum$cp
+```
+# use step() to run stepwise regression, backward selection.
+```{r}
+head(valid.df)
+head(train.df)
+car.lm <- lm(Price ~ ., data = train.df)
+car.lm.step <- step(car.lm, direction = "backward")
+summary(car.lm.step) # Which variables did it drop?
+car.lm.step.pred <- predict(car.lm.step, valid.df)
+accuracy(car.lm.step.pred, valid.df$Price)
+```
+## Forward selection
+```{r}
+car.lm <- lm(Price ~ ., data = train.df)
+car.lm.step <- step(car.lm, direction = "forward")
+summary(car.lm.step) #
+```
+#Stepwise 
+```{r}
+# use step() to run stepwise regression.
+car.lm <- lm(Price ~ ., data = train.df)
+car.lm.step <- step(car.lm, direction = "both")
+summary(car.lm.step)  # Which variables were dropped/added?
+car.lm.step.pred <- predict(car.lm.step, valid.df)
+accuracy(car.lm.step.pred, valid.df$Price)
+```
+
